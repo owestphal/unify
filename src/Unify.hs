@@ -1,19 +1,55 @@
 {-# LANGUAGE PartialTypeSignatures #-}
-module Unify where
+module Unify (
+  UnificationProblem,
+  Substitution,
+  Unifier,
+  Term,
+  VarName,
+  FunctionSymbol,
+  varName,
+  name,
+  fsym,
+  symbol,
+  symbols,
+  unApply,
+  arity,
+  term,
+  var,
+  constant,
+  isVar,
+  isIllDefined,
+  varsT,
+  unify,
+  unifyWithLog,
+  substitute,
+  ) where
 
-import           Control.Monad
-import           Control.Monad.Trans.Writer
-import qualified Data.List                  as List
-import           Data.Maybe
+import Control.Monad.Trans.Writer
+
+import Data.List (nub, (\\))
+import qualified Data.List as List (delete)
+import Data.Maybe
 
 -- -------------------------------------------
 -- -------------- types ----------------------
 -- -------------------------------------------
-type TermPair = (Term,Term)
-type UnificationProblem = [TermPair]
+type UnificationProblem = [(Term,Term)]
 
-newtype VarName = MkVN String deriving Eq
+newtype VarName = MkVN { name :: String } deriving Eq
+
+varName :: String -> VarName
+varName = MkVN
+
 data FunctionSymbol = MkFS String Int deriving Eq
+
+fsym :: String -> Int -> FunctionSymbol
+fsym = MkFS
+
+symbol :: FunctionSymbol -> String
+symbol (MkFS f _) = f
+
+arity :: FunctionSymbol -> Int
+arity (MkFS _ i) = i
 
 data Term = V VarName
           | T FunctionSymbol [Term]
@@ -27,8 +63,21 @@ term f@(MkFS _ i) xs = if length xs == i
                       else IllDefinedTerm $ "wrong number of arguments in " ++ show f
 
 -- "smart" constructor for V, for consistence
-var :: VarName -> Term
-var = V
+var :: String -> Term
+var = V . MkVN
+
+-- constants, ie, function symbols of arity 0
+constant :: String -> Term
+constant c = term (fsym c 0) []
+
+symbols :: Term -> [FunctionSymbol]
+symbols (V _) = []
+symbols (T f ts) = nub $ f : concatMap symbols ts
+symbols (IllDefinedTerm _) = []
+
+unApply :: Term -> Maybe (FunctionSymbol, [Term])
+unApply (T f ts) = Just (f, ts)
+unApply _ = Nothing
 
 -- ----------------------------------------
 -- -------- Show instances ----------------
@@ -52,6 +101,10 @@ isVar :: Term -> Bool
 isVar (V _) = True
 isVar _     = False
 
+isIllDefined :: Term -> Bool
+isIllDefined (IllDefinedTerm _) = True
+isIllDefined _     = False
+
 type Substitution = [(VarName, Term)]
 
 substitute :: Substitution -> Term -> Term
@@ -63,19 +116,22 @@ substitute _ (IllDefinedTerm s) = IllDefinedTerm s
 
 varsT :: Term -> [VarName]
 varsT (V x) = [x]
-varsT (T _ xs) = List.nub $ concatMap varsT xs
+varsT (T _ xs) = nub $ concatMap varsT xs
 varsT (IllDefinedTerm _) = []
 
 varsU :: UnificationProblem -> [VarName]
-varsU xs = List.nub $ [ x | (s,_) <- xs, x <- varsT s] ++ [ x | (_,t) <- xs, x <- varsT t]
+varsU xs = nub $ [ x | (s,_) <- xs, x <- varsT s] ++ [ x | (_,t) <- xs, x <- varsT t]
 
 -- ---------------------------------------------
 -- -------------- unification ------------------
 -- ---------------------------------------------
 type Unifier = Substitution
 
-unify :: UnificationProblem -> Writer [String] (Maybe Unifier)
-unify xs = do
+unify :: UnificationProblem -> Maybe Unifier
+unify = fst . runWriter . unifyWithLog
+
+unifyWithLog :: UnificationProblem -> Writer [String] (Maybe Unifier)
+unifyWithLog xs = do
   ys <- unificationStep delete      (logString "Delete") xs
     >>= unificationStep reduceTerm  (logString "Term reduction")
     >>= unificationStep exchange    (logString "Swap")
@@ -87,17 +143,17 @@ unify xs = do
       let maybeSolution = trySolve ys
       if isNothing maybeSolution then tell ["No unifier found!"] else tell ["Found unifier!"]
       return maybeSolution
-    else unify ys
+    else unifyWithLog ys
 
 logString :: String -> (Term,Term) -> String
 logString msg (s,t) = concat [msg, ": (", show s, ", ", show t, ")"]
 
-type UnificationStep = UnificationProblem -> (UnificationProblem, Maybe TermPair)
+type UnificationStep = UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 
 -- this function takes care of applying the reduction steps
 -- and the logging based on the outcome of the reduction step
 unificationStep :: UnificationStep
-                -> (TermPair -> String)
+                -> ((Term,Term) -> String)
                 ->  UnificationProblem
                 -> Writer [String] UnificationProblem
 unificationStep step logMsg xs = case step xs of
@@ -117,33 +173,33 @@ isSolvedForm xs = all solvedForm xs
 -- ---------------------------------------------------------
 -- ----------- Transformation operations -------------------
 -- ---------------------------------------------------------
-delete :: UnificationProblem -> (UnificationProblem, Maybe TermPair)
+delete :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 delete = matchAndCombine match combine
   where match (s,t) = s == t
         combine xs _ ys = xs ++ ys
 
 
-reduceTerm :: UnificationProblem -> (UnificationProblem, Maybe TermPair)
+reduceTerm :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 reduceTerm = matchAndCombine match combine
   where match (T f _, T g _) = f == g
         match _ = False
-        combine xs (T _ ss, T _ ts) ys = List.nub $ xs ++ zip ss ts ++ ys
+        combine xs (T _ ss, T _ ts) ys = nub $ xs ++ zip ss ts ++ ys
         combine _ _  _ = undefined
 
 
-exchange :: UnificationProblem -> (UnificationProblem, Maybe TermPair)
+exchange :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 exchange = matchAndCombine match combine
   where match (t, V _) = not $ isVar t
         match _ = False
-        combine xs (t, V x) ys = List.nub $ xs ++ [(V x, t)] ++ ys
+        combine xs (t, V x) ys = nub $ xs ++ [(V x, t)] ++ ys
         combine _ _ _ = undefined
 
-reduceVar :: UnificationProblem -> (UnificationProblem, Maybe TermPair)
+reduceVar :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 reduceVar xs = matchAndCombine match combine xs
-  where match (V x, t) = x `notElem` varsT t && x `elem` varsU (xs List.\\ [(V x, t)])
+  where match (V x, t) = x `notElem` varsT t && x `elem` varsU (xs \\ [(V x, t)])
         match _ = False
         combine ys (V x, t) zs = let sigma = substitute [(x, t)]
-                                 in (V x,t) : List.nub [(sigma u, sigma v) | (u,v) <- ys ++ zs ]
+                                 in (V x,t) : nub [(sigma u, sigma v) | (u,v) <- ys ++ zs ]
         combine _ _ _ = undefined
 
 -- traverses a list until an element satisfies the match function.
@@ -155,49 +211,3 @@ matchAndCombine match combine xs = go xs []
         go (y:ys) zs = if match y
                        then (combine (reverse zs) y ys, Just y)
                        else go ys (y:zs)
-
--- ----------------------------------------
--- ------------- problems ----------------
--- ---------------------------------------
-solveProblems :: IO ()
-solveProblems = zipWithM_ solveProblem ["i)","ii)","iii)","iv)","v)"] [problem1, problem2, problem3, problem4, problem5]
-
-solveProblem :: String -> UnificationProblem -> IO ()
-solveProblem name xs =
-  let (_,logs) = runWriter $
-                    tell ["Solving problem " ++ name ++ ":", show xs, ""]
-                    >> unify xs
-  in putStrLn (unlines logs)
-
-f,g,h :: _ -> Term
-a,x0,x1,x2,x3,x4,y0,y1,y2,y3 :: Term
-(f, g, h, a) = (term (MkFS "f" 2), term (MkFS "g" 5), term (MkFS "h" 1), term (MkFS "a" 0) [])
-(x0, x1, x2, x3, x4) = (var (MkVN "x0"), var (MkVN "x1"), var (MkVN "x2"), var (MkVN "x3"), var (MkVN "x4"))
-(y0, y1, y2, y3) = (var (MkVN "y0"), var (MkVN "y1"), var (MkVN "y2"), var (MkVN "y3"))
-
-t1,t2,t3,t4,t5,t6,t7,t8,t9,t10 :: Term
-problem1,problem2,problem3,problem4,problem5 :: UnificationProblem
-t1 = f [h [x1], f [x3, x4]]
-t2 = f [x2, f [x4, x2]]
-t3 = f [x3, f [x2, x3]]
-
-problem1 = [(t1,t2),(t1,t3)]
-
-t4 = f [x1, f [x2, x3]]
-
-problem2 = [(t1,t2),(t1,t4)]
-
-t5 = g [x1, x2, f [y0, y0], f [y1, y1], f [y2, y2]]
-t6 = g [f [x0, x0], f [x1, x1], y1, y2, x2]
-
-problem3 = [(t5,t6)]
-
-t7 = g [g [x1, f [x1, a], x2, x2, x3], f [a, x2], x1, x2, f [x2, a]]
-t8 = g [g [x2, x4, x1, x2, f [x4, x1]], f [x1, a], x1, x2, f [a, x1]]
-
-problem4 = [(t7,t8)]
-
-t9  = g [x2, x1, f [a, y3], f [y1,y1], f [y2,y2]]
-t10  = g [f [x0, x0], y1, f [x1, x1], x2, y3]
-
-problem5 = [(t9,t10)]
