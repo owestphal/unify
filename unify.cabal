@@ -1,17 +1,17 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3839f3d7c3bbed24cc03db5678e4ef0ee48a4d2890edf30d42fdb6010a17c271
+-- hash: 204187218117ca956be19dafc08420ea32cd759359f017f34b8b0fb15031afce
 
 name:           unify
-version:        0.0.1.0
-description:    Please see the README on GitHub at <https://github.com/owestphal/IOTasks#readme>
+version:        0.0.1.1
+description:    Please see the README on GitHub at <https://github.com/owestphal/unify#readme>
 category:       Unification
-homepage:       https://github.com/owestphal/IOTasks#readme
-bug-reports:    https://github.com/owestphal/IOTasks/issues
+homepage:       https://github.com/owestphal/unify#readme
+bug-reports:    https://github.com/owestphal/unify/issues
 author:         Oliver Westphal
 maintainer:     o_westphal (at) online (dot) de
 copyright:      2020 Oliver Westphal
@@ -21,7 +21,7 @@ build-type:     Simple
 
 source-repository head
   type: git
-  location: https://github.com/owestphal/IOTasks
+  location: https://github.com/owestphal/unify
 
 library
   exposed-modules:
