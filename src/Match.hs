@@ -1,5 +1,5 @@
 module Match (
-  match,
+  match, matchE
   ) where
 
 import           Data.List                  (nub, union)
@@ -12,10 +12,14 @@ import Data.Bifunctor (second)
 type Matcher = Substitution
 
 match :: (Term,Term) -> Maybe Matcher
-match (s,t) = Set.map (second inverseReplace) <$> unify (Set.singleton (s,replace t))
-  where (replace,inverseReplace) = varsToFreshConst (Set.toList $ varsT t) freshSymbols
-        usedSymbols = map symbol $ symbols s `union` symbols t
-        freshSymbols = filter (`notElem` usedSymbols) names
+match = matchE []
+
+matchE :: Theory -> (Term,Term) -> Maybe Matcher
+matchE theory (s,t) = Set.map (second inverseReplace) <$> unifyE theory (Set.singleton (s,replace t))
+  where
+    (replace,inverseReplace) = varsToFreshConst (Set.toList $ varsT t) freshSymbols
+    usedSymbols = map symbol $ symbols s `union` symbols t
+    freshSymbols = filter (`notElem` usedSymbols) names
 
 -- creates a bijective mapping from variables (in the first list)
 -- to function symbols of arity 0 (with names from the second list)

@@ -24,6 +24,7 @@ module Unify (
   unify,
   unifyWithLog,
   unifyE,
+  unifyEWithLog,
   monoidTheory,
   Theory,
   RewriteRule,
@@ -234,8 +235,12 @@ matchAndCombine match combine xs = applyCombine $ Set.foldr f (Set.empty,Nothing
 -- ---------------------------------------------------------
 -- ---------- Unification modulo monoids -------------------
 -- ---------------------------------------------------------
-unifyE :: Theory -> UnificationProblem -> (Maybe Unifier,[String])
-unifyE theory up = first (fmap (Set.filter (\(x,_) -> x `elem` varsU up))) . runWriter $ unify' [up]
+unifyE ::Theory -> UnificationProblem -> Maybe Unifier
+unifyE [] = unify
+unifyE theory = fst . unifyEWithLog theory
+
+unifyEWithLog :: Theory -> UnificationProblem -> (Maybe Unifier,[String])
+unifyEWithLog theory up = first (fmap (Set.filter (\(x,_) -> x `elem` varsU up))) . runWriter $ unify' [up]
   where
     unify' :: [UnificationProblem] -> Writer [String] (Maybe Unifier)
     unify' [] = tell ["No unifier found!"] >> pure Nothing
