@@ -17,6 +17,7 @@ description:         Please see the README on GitHub at <https://github.com/owes
 dependencies:
 - base >= 4.8 && < 5
 - transformers
+- containers
 
 library:
   source-dirs: src
@@ -26,3 +27,16 @@ library:
   exposed-modules:
   - Unify
   - Match
+
+tests:
+  unify-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -O2
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - unify
+    - hspec

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 204187218117ca956be19dafc08420ea32cd759359f017f34b8b0fb15031afce
+-- hash: d8ed8d5476275d6a43f8a5ebe4bacf874b0fb522ac3dbaac9655efead71d47c5
 
 name:           unify
 version:        0.0.1.1
@@ -28,12 +28,29 @@ library
       Unify
       Match
   other-modules:
-      Examples
       Paths_unify
   hs-source-dirs:
       src
   ghc-options: -Wall -fdefer-typed-holes
   build-depends:
       base >=4.8 && <5
+    , containers
     , transformers
+  default-language: Haskell2010
+
+test-suite unify-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Examples
+      Paths_unify
+  hs-source-dirs:
+      test
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.8 && <5
+    , containers
+    , hspec
+    , transformers
+    , unify
   default-language: Haskell2010
