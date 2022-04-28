@@ -52,3 +52,17 @@ t9  = g [x2, x1, f [a, y3], f [y1,y1], f [y2,y2]]
 t10  = g [f [x0, x0], y1, f [x1, x1], x2, y3]
 
 problem5 = [(t9,t10)]
+
+-- ---------------------------------------
+-- --------- monoid problems -------------
+-- ---------------------------------------
+
+mproblem1 :: Int -> UnificationProblem
+mproblem1 n = [(cons (var "X1") (toTerm (replicate n 'a') (cons (var "X2") (toTerm "b" (constant "b")))) , toTerm ("hollo"++ replicate n 'a' ++ "cc") (toTerm "!b" (constant "b")))]
+  where
+    cons x y = term (fsym "cons" 2) [x,y]
+mtheory :: Theory
+mtheory = monoidTheory (fsym "cons" 2) (fsym "" 0)
+
+toTerm :: String -> Term -> Term
+toTerm s t = foldr (\c t -> term (fsym "cons" 2) [constant [c],t]) t s

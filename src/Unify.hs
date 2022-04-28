@@ -21,6 +21,10 @@ module Unify (
   varsT,
   unify,
   unifyWithLog,
+  unifyE,
+  monoidTheory,
+  Theory,
+  RewriteRule,
   substitute,
   ) where
 
@@ -29,6 +33,8 @@ import Control.Monad.Trans.Writer
 import Data.List (nub, (\\))
 import qualified Data.List as List (delete)
 import Data.Maybe
+import Data.Tuple (swap)
+import Control.Arrow (first)
 
 -- -------------------------------------------
 -- -------------- types ----------------------
@@ -170,6 +176,14 @@ isSolvedForm xs = all solvedForm xs
                           && x `notElem` varsU (List.delete (V x, t) xs)
         solvedForm _ = False
 
+isUnsolvable :: UnificationProblem -> Bool
+isUnsolvable [] = False
+isUnsolvable ((s,t):xs) = conflict s t || isUnsolvable xs
+  where
+    conflict (T f _) (T g _) = f /= g
+    conflict _ _ = False
+
+
 -- ---------------------------------------------------------
 -- ----------- Transformation operations -------------------
 -- ---------------------------------------------------------
@@ -207,7 +221,95 @@ reduceVar xs = matchAndCombine match combine xs
 -- are rearranged/modified using the combine function
 matchAndCombine :: (a -> Bool) -> ([a] -> a -> [a] -> [a]) -> [a] -> ([a],Maybe a)
 matchAndCombine match combine xs = go xs []
-  where go [] zs     = (zs, Nothing)
+  where go [] zs     = (reverse zs, Nothing)
         go (y:ys) zs = if match y
                        then (combine (reverse zs) y ys, Just y)
                        else go ys (y:zs)
+
+-- ---------------------------------------------------------
+-- ---------- Unification modulo monoids -------------------
+-- ---------------------------------------------------------
+unifyE :: Theory -> UnificationProblem -> (Maybe Unifier,[String])
+unifyE theory up = first (fmap (filter (\(x,_) -> x `elem` varsU up))) . runWriter $ unify' [up]
+  where
+    unify' :: [UnificationProblem] -> Writer [String] (Maybe Unifier)
+    unify' [] = tell ["No unifier found!"] >> pure Nothing
+    unify' (xs:xss) = do
+      tell ["try simple rules"]
+      ys <- unificationStep delete      (logString "Delete") xs
+        >>= unificationStep exchange    (logString "Swap")
+        >>= unificationStep reduceVar   (logString "Variable reduction")
+
+      if xs == ys
+        then do
+          tell ["No further simple rules applicable."]
+          let maybeSolution = trySolve ys
+          if isNothing maybeSolution
+            then do
+              tell ["try term reduction and paramodulation"]
+              zs <- unificationStep reduceTerm  (logString "Term reduction") ys
+              let
+                yss = paramodulations theory ys
+              -- tell ["new candidates: " ++ show yss]
+              let
+                yss' = [zs | zs /= ys] ++ filter (not . isUnsolvable) yss
+              -- tell [show (length yss') ++ " solvable candidates"]
+              unify' (yss'++xss)
+            else do
+              tell ["Found unifier!"]
+              return maybeSolution
+        else do
+          tell [show xs,show ys]
+          unify' (ys:xss)
+
+type Theory = [RewriteRule]
+type RewriteRule = (Term,Term)
+
+monoidTheory :: FunctionSymbol -> FunctionSymbol -> Theory
+monoidTheory fSym eSym
+  | arity fSym == 2 && arity eSym == 0 =
+    [ (f e x, x) -- I_l
+    , (f x e, x) -- I_r
+    , (f (f x y) z, f x (f y z))] -- A
+  | otherwise = error "arity error"
+  where
+    f a b = term fSym [a,b]
+    e = term eSym []
+    (x,y,z) = (var "A",var "B",var "C")
+
+paramodulations :: Theory -> UnificationProblem -> [UnificationProblem]
+paramodulations theory up =
+  let
+    xs = [ParaChoice (l, r) (s, t) up' |
+      (l, r) <- theory,
+      isJust $ topSym l,
+      ((s, t), up') <- selectAll up ++ selectAll (map swap up),
+      topSym l == topSym s]
+  in applyParamodulation <$> xs
+  where
+    topSym (T (MkFS f _) _) = Just f
+    topSym _ = Nothing
+
+
+selectAll :: [a] -> [(a,[a])]
+selectAll = go [] where
+  go _ [] = []
+  go xs (y:ys) = (y,xs++ys) : go (y:xs) ys
+
+data ParaChoice = ParaChoice { _rule :: RewriteRule, _equation :: (Term,Term), _restProblem :: UnificationProblem }
+
+applyParamodulation :: ParaChoice -> UnificationProblem
+applyParamodulation (ParaChoice (l,r) (s,t) up) = zip ls ss ++ [(r',t)] ++ up
+  where
+    Just (_,ls) = unApply l'
+    Just (_,ss) = unApply s
+    (l',r') =
+      let
+        upNames = varsU $ (s,t):up
+        eqNames = nub $ varsT l ++ varsT r
+        freshSubst = zip eqNames $ map V $ filter (`notElem` upNames) (map MkVN names)
+      in (substitute freshSubst l, substitute freshSubst r)
+
+names :: [String]
+names = letters ++ ((++) <$> names <*> letters )
+  where letters = map (:[]) ['A'..'Z']
