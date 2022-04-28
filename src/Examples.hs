@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 module Examples where
 
@@ -7,15 +8,13 @@ import           Control.Monad
 import           Control.Monad.Trans.Writer
 
 solveProblems :: IO ()
-solveProblems = zipWithM_ solveProblem ["i)","ii)","iii)","iv)","v)"] [problem1, problem2, problem3, problem4, problem5]
+solveProblems = zipWithM_ f ["i)","ii)","iii)","iv)","v)"] [problem1, problem2, problem3, problem4, problem5]
+  where
+    f n p = do
+      putStrLn $ unlines $ snd $ solveProblem n p
 
-solveProblem :: String -> UnificationProblem -> IO ()
-solveProblem name xs =
-  let (_,logs) = runWriter $
-                    tell ["Solving problem " ++ name ++ ":", show xs, ""]
-                    >> unifyWithLog xs
-  in putStrLn (unlines logs)
-
+solveProblem :: String -> UnificationProblem -> (Maybe Unifier,[String])
+solveProblem name xs = runWriter $ tell ["Solving problem " ++ name ++ ":", show xs, ""] >> unifyWithLog xs
 
 -- ----------------------------------------
 -- ------------- problems ----------------

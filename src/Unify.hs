@@ -1,4 +1,6 @@
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant lambda" #-}
 module Unify (
   UnificationProblem,
   Substitution,
@@ -29,24 +31,28 @@ module Unify (
   ) where
 
 import Control.Monad.Trans.Writer
+import Control.Arrow (first)
 
-import Data.List (nub, (\\))
-import qualified Data.List as List (delete)
+import Data.List (nub)
+
+import Data.Set (Set)
+import qualified Data.Set as Set
+
 import Data.Maybe
 import Data.Tuple (swap)
-import Control.Arrow (first)
+import Data.Bifunctor (bimap)
 
 -- -------------------------------------------
 -- -------------- types ----------------------
 -- -------------------------------------------
-type UnificationProblem = [(Term,Term)]
+type UnificationProblem = Set (Term,Term)
 
-newtype VarName = MkVN { name :: String } deriving Eq
+newtype VarName = MkVN { name :: String } deriving (Eq,Ord)
 
 varName :: String -> VarName
 varName = MkVN
 
-data FunctionSymbol = MkFS String Int deriving Eq
+data FunctionSymbol = MkFS String Int deriving (Eq,Ord)
 
 fsym :: String -> Int -> FunctionSymbol
 fsym = MkFS
@@ -60,7 +66,7 @@ arity (MkFS _ i) = i
 data Term = V VarName
           | T FunctionSymbol [Term]
           | IllDefinedTerm String
-            deriving Eq
+            deriving (Eq,Ord)
 
 -- smart constructo for T
 term :: FunctionSymbol -> [Term] -> Term
@@ -111,22 +117,20 @@ isIllDefined :: Term -> Bool
 isIllDefined (IllDefinedTerm _) = True
 isIllDefined _     = False
 
-type Substitution = [(VarName, Term)]
+type Substitution = Set (VarName, Term)
 
 substitute :: Substitution -> Term -> Term
-substitute [] (V x) = V x
-substitute ((v,t):ss) (V x) | v == x = t
-                            | otherwise = substitute ss (V x)
+substitute s (V x) = foldr (\(v,t) u -> if v == x then t else u) (V x) s
 substitute s (T f xs) = T f (map (substitute s) xs)
 substitute _ (IllDefinedTerm s) = IllDefinedTerm s
 
-varsT :: Term -> [VarName]
-varsT (V x) = [x]
-varsT (T _ xs) = nub $ concatMap varsT xs
-varsT (IllDefinedTerm _) = []
+varsT :: Term -> Set VarName
+varsT (V x) = Set.singleton x
+varsT (T _ xs) = Set.unions $ map varsT xs
+varsT (IllDefinedTerm _) = Set.empty
 
-varsU :: UnificationProblem -> [VarName]
-varsU xs = nub $ [ x | (s,_) <- xs, x <- varsT s] ++ [ x | (_,t) <- xs, x <- varsT t]
+varsU :: UnificationProblem -> Set VarName
+varsU = Set.foldr (\(s,t) vs -> Set.unions [varsT s, varsT t, vs]) Set.empty
 
 -- ---------------------------------------------
 -- -------------- unification ------------------
@@ -167,21 +171,19 @@ unificationStep step logMsg xs = case step xs of
                       (ys, Nothing) -> writer (ys, [])
 
 trySolve :: UnificationProblem -> Maybe Unifier
-trySolve xs | isSolvedForm xs = Just $ map (\(V x,t) -> (x,t)) xs
+trySolve xs | isSolvedForm xs = Just $ Set.map (\(V x,t) -> (x,t)) xs
             | otherwise       = Nothing
 
 isSolvedForm :: UnificationProblem -> Bool
 isSolvedForm xs = all solvedForm xs
   where solvedForm (V x,t) = x `notElem` varsT t
-                          && x `notElem` varsU (List.delete (V x, t) xs)
+                          && x `notElem` varsU (Set.delete (V x, t) xs)
         solvedForm _ = False
 
 isUnsolvable :: UnificationProblem -> Bool
-isUnsolvable [] = False
-isUnsolvable ((s,t):xs) = conflict s t || isUnsolvable xs
-  where
-    conflict (T f _) (T g _) = f /= g
-    conflict _ _ = False
+isUnsolvable = any conflict where
+  conflict (T f _,T g _) = f /= g
+  conflict _ = False
 
 
 -- ---------------------------------------------------------
@@ -190,47 +192,50 @@ isUnsolvable ((s,t):xs) = conflict s t || isUnsolvable xs
 delete :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 delete = matchAndCombine match combine
   where match (s,t) = s == t
-        combine xs _ ys = xs ++ ys
+        combine _ xs = xs
 
 
 reduceTerm :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 reduceTerm = matchAndCombine match combine
   where match (T f _, T g _) = f == g
         match _ = False
-        combine xs (T _ ss, T _ ts) ys = nub $ xs ++ zip ss ts ++ ys
-        combine _ _  _ = undefined
+        combine (T _ ss, T _ ts) xs = xs `Set.union` Set.fromList (zip ss ts)
+        combine _  _ = undefined
 
 
 exchange :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 exchange = matchAndCombine match combine
   where match (t, V _) = not $ isVar t
         match _ = False
-        combine xs (t, V x) ys = nub $ xs ++ [(V x, t)] ++ ys
-        combine _ _ _ = undefined
+        combine (t, V x) xs = Set.unions [xs, Set.singleton (V x, t)]
+        combine _ _ = undefined
 
 reduceVar :: UnificationProblem -> (UnificationProblem, Maybe (Term,Term))
 reduceVar xs = matchAndCombine match combine xs
-  where match (V x, t) = x `notElem` varsT t && x `elem` varsU (xs \\ [(V x, t)])
+  where match (V x, t) = x `notElem` varsT t && x `elem` varsU (Set.delete (V x, t) xs)
         match _ = False
-        combine ys (V x, t) zs = let sigma = substitute [(x, t)]
-                                 in (V x,t) : nub [(sigma u, sigma v) | (u,v) <- ys ++ zs ]
-        combine _ _ _ = undefined
+        combine (V x, t) ys = let sigma = substitute $ Set.singleton (x, t)
+                              in Set.insert (V x,t) $ Set.map (bimap sigma sigma) ys
+        combine _ _ = undefined
 
--- traverses a list until an element satisfies the match function.
--- then the skipped elements, the matched element, and the remaining elements
--- are rearranged/modified using the combine function
-matchAndCombine :: (a -> Bool) -> ([a] -> a -> [a] -> [a]) -> [a] -> ([a],Maybe a)
-matchAndCombine match combine xs = go xs []
-  where go [] zs     = (reverse zs, Nothing)
-        go (y:ys) zs = if match y
-                       then (combine (reverse zs) y ys, Just y)
-                       else go ys (y:zs)
+-- traverses a set until an element satisfies the match function.
+-- then the matched element and all other elements
+-- are combined using the combine function
+matchAndCombine :: Ord a => (a -> Bool) -> (a -> Set a -> Set a) -> Set a -> (Set a,Maybe a)
+matchAndCombine match combine xs = applyCombine $ Set.foldr f (Set.empty,Nothing) xs
+  where
+    applyCombine (s,Just x) = (combine x s,Just x)
+    applyCombine (s,Nothing) = (s,Nothing)
+    f e (s,Just x) = (Set.insert e s, Just x)
+    f e (s,Nothing)
+      | match e = (s,Just e)
+      | otherwise = (Set.insert e s, Nothing)
 
 -- ---------------------------------------------------------
 -- ---------- Unification modulo monoids -------------------
 -- ---------------------------------------------------------
 unifyE :: Theory -> UnificationProblem -> (Maybe Unifier,[String])
-unifyE theory up = first (fmap (filter (\(x,_) -> x `elem` varsU up))) . runWriter $ unify' [up]
+unifyE theory up = first (fmap (Set.filter (\(x,_) -> x `elem` varsU up))) . runWriter $ unify' [up]
   where
     unify' :: [UnificationProblem] -> Writer [String] (Maybe Unifier)
     unify' [] = tell ["No unifier found!"] >> pure Nothing
@@ -283,7 +288,7 @@ paramodulations theory up =
     xs = [ParaChoice (l, r) (s, t) up' |
       (l, r) <- theory,
       isJust $ topSym l,
-      ((s, t), up') <- selectAll up ++ selectAll (map swap up),
+      ((s, t), up') <- selectAll up ++ selectAll (Set.map swap up),
       topSym l == topSym s]
   in applyParamodulation <$> xs
   where
@@ -291,23 +296,22 @@ paramodulations theory up =
     topSym _ = Nothing
 
 
-selectAll :: [a] -> [(a,[a])]
-selectAll = go [] where
-  go _ [] = []
-  go xs (y:ys) = (y,xs++ys) : go (y:xs) ys
+selectAll :: Ord a => Set a -> [(a,Set a)]
+selectAll s = map (\e -> (e,Set.delete e s)) $ Set.toList s
 
 data ParaChoice = ParaChoice { _rule :: RewriteRule, _equation :: (Term,Term), _restProblem :: UnificationProblem }
 
 applyParamodulation :: ParaChoice -> UnificationProblem
-applyParamodulation (ParaChoice (l,r) (s,t) up) = zip ls ss ++ [(r',t)] ++ up
+applyParamodulation (ParaChoice (l,r) (s,t) up) = Set.unions [Set.fromList $ zip ls ss, Set.singleton (r',t), up]
   where
     Just (_,ls) = unApply l'
     Just (_,ss) = unApply s
     (l',r') =
       let
-        upNames = varsU $ (s,t):up
-        eqNames = nub $ varsT l ++ varsT r
-        freshSubst = zip eqNames $ map V $ filter (`notElem` upNames) (map MkVN names)
+        upNames = Set.unions [varsT s, varsT t,varsU up]
+        eqNames = varsT l `Set.union` varsT r
+        freshNames = map V $ filter (`notElem` upNames) (map MkVN names)
+        (freshSubst,_) = Set.foldr (\e (sub,x:xs) -> (Set.insert (e,x) sub,xs)) (Set.empty,freshNames) eqNames
       in (substitute freshSubst l, substitute freshSubst r)
 
 names :: [String]

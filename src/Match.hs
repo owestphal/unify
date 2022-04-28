@@ -6,12 +6,14 @@ import           Data.List                  (nub, union)
 import           Data.Tuple                 (swap)
 
 import           Unify
+import qualified Data.Set as Set
+import Data.Bifunctor (second)
 
 type Matcher = Substitution
 
 match :: (Term,Term) -> Maybe Matcher
-match (s,t) = map (\(x,t) -> (x,inverseReplace t)) <$> unify [(s,replace t)]
-  where (replace,inverseReplace) = varsToFreshConst (varsT t) freshSymbols
+match (s,t) = Set.map (second inverseReplace) <$> unify (Set.singleton (s,replace t))
+  where (replace,inverseReplace) = varsToFreshConst (Set.toList $ varsT t) freshSymbols
         usedSymbols = map symbol $ symbols s `union` symbols t
         freshSymbols = filter (`notElem` usedSymbols) names
 
@@ -24,7 +26,7 @@ varsToFreshConst :: [VarName] -> [String] -> (Term -> Term, Term -> Term)
 varsToFreshConst vs fs = (replace,inverseReplace)
   where mapping = zip (nub vs) (map (\s-> fsym s 0) $ nub fs)
         inverseMapping = map swap mapping
-        replace = substitute (map (\(x,s)->(x,term s [])) mapping)
+        replace = substitute (Set.fromList $ map (\(x,s)->(x,term s [])) mapping)
         inverseReplace t =
           case unApply t of
             Just (f,[]) -> case lookup f inverseMapping of
