@@ -15,4 +15,4 @@ main = hspec $ do
     it "problem5 is unsolvable" $  solveProblem "v)" problem5 `shouldNotSatisfy` (isJust . fst)
 
   describe "monoid unification" $ do
-    fit "" $ unifyE mtheory (mproblem1 200) `shouldSatisfy` (isJust . fst)
+    it "mproblem1 is solvable" $ unifyE mtheory (mproblem1 10) `shouldSatisfy` (isJust . fst)

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d8ed8d5476275d6a43f8a5ebe4bacf874b0fb522ac3dbaac9655efead71d47c5
+-- hash: fcc7d1c66026b7c51510b1f642077e2db8400b6c1b0de5791eb7321edc927001
 
 name:           unify
 version:        0.0.1.1
@@ -28,6 +28,7 @@ library
       Unify
       Match
   other-modules:
+      Examples
       Paths_unify
   hs-source-dirs:
       src
